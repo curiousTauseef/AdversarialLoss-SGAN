@@ -13,8 +13,7 @@ Autonomous vehicles need to accurately forecast future human trajectories in ord
 
 Below we show the example of predictions made by SGAN (left) and our model (right) in a simple controlled experiment. 
 <div align='center'>
-<img src="images/Default.png" style="width: 45vw;"></img>
-<img src="images/Proposed.png" style="width: 45vw;"></img>
+<img src="images/Default.png" style="width: 45vw;"></img> <img src="images/Proposed.png" style="width: 45vw;"></img>
 </div>
 
 If you find this code useful in your research then please cite

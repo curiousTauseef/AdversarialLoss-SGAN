@@ -1,73 +1,58 @@
-# Social GAN
+# Social GAN: Analyzing Adversarial Architecture 
 
 This is the code for the paper
 
-**<a href="https://arxiv.org/abs/1803.10892">Social GAN: Socially Acceptable Trajectories with Generative Adversarial Networks</a>**
+**<a href="https://transp-or.epfl.ch/heart/2019/abstracts/hEART_2019_paper_148.pdf">Adversarial Loss for Human Trajectory Prediction</a>**
 <br>
-<a href="http://web.stanford.edu/~agrim/">Agrim Gupta</a>,
-<a href="http://cs.stanford.edu/people/jcjohns/">Justin Johnson</a>,
-<a href="http://vision.stanford.edu/feifeili/">Fei-Fei Li</a>,
-<a href="http://cvgl.stanford.edu/silvio/">Silvio Savarese</a>,
-<a href="http://web.stanford.edu/~alahi/">Alexandre Alahi</a>
+<a href="https://people.epfl.ch/parth.kothari">Parth Kothari</a>,
+<a href="https://people.epfl.ch/alexandre.alahi">Alexandre Alahi</a>
 <br>
-Presented at [CVPR 2018](http://cvpr2018.thecvf.com/)
+Presented at [hEART 2019](http://heart2019.bme.hu)
 
-Human motion is interpersonal, multimodal and follows social conventions. In this paper, we tackle this problem by combining tools from sequence prediction and generative adversarial networks: a recurrent sequence-to-sequence model observes motion histories and predicts future behavior, using a novel pooling mechanism to aggregate information across
-people.
+Autonomous vehicles need to accurately forecast future human trajectories in order to navigate safely and gain human trust. The current best performing approach Social GAN (SGAN) is based on Generative Adversarial Network (GAN) taking advantage of the success of Recurrent Neural Network (RNN) models in sequence prediction tasks. A crucial architectural difference of SGAN in comparison to Social LSTM is the incorporation of the GAN framework. We highlight an unexpected pitfall in this adversarial architecture via controlled experiments. Furthermore, we prove the efficacy of our proposed modification on synthetic data and real world datasets, thereby indicating room for improvement on state-of-the-art.
 
-Below we show an examples of socially acceptable predictions made by our model in complex scenarios. Each person is denoted by a different color. We denote observed trajectory by dots and predicted trajectory by stars.
+Below we show the example of predictions made by SGAN (left) and our model (right) in a simple controlled experiment. 
 <div align='center'>
-<img src="images/2.gif"></img>
-<img src="images/3.gif"></img>
+<img src="images/Default.png"></img>
+<img src="images/Proposed.png"></img>
 </div>
 
 If you find this code useful in your research then please cite
 ```
-@inproceedings{gupta2018social,
-  title={Social GAN: Socially Acceptable Trajectories with Generative Adversarial Networks},
-  author={Gupta, Agrim and Johnson, Justin and Fei-Fei, Li and Savarese, Silvio and Alahi, Alexandre},
-  booktitle={IEEE Conference on Computer Vision and Pattern Recognition (CVPR)},
+@inproceedings{KothariAdversarialLF,
+  title={Adversarial Loss for Human Trajectory Prediction},
+  author={Parth Kothari and Alexandre Alahi},
+  booktitle={hEART 2019: 8th Symposium of the European Association for Research in Transportation},
   number={CONF},
-  year={2018}
+  year={2019}
 }
 ```
 
 ## Model
-Our model consists of three key components: Generator (G), Pooling Module (PM) and Discriminator (D). G is based on encoder-decoder framework where we link the hidden states of encoder and decoder via PM. G takes as input trajectories of all people involved in a scene and outputs corresponding predicted trajectories. D inputs the entire sequence comprising both input trajectory and future prediction and classifies them as “real/fake”.
+Social GAN consists of three key components: Generator (G), Pooling Module (PM) and Discriminator (D). G and PM are responsible for outputting predicted future trajectories based on the input observed trajectories. D inputs the entire sequence comprising both input trajectory and future prediction and classifies them as “real/fake”. We show that the proposed D is unable to provide gradients to G for effective learning, thereby indicating room for improvement on state-of-the-art. We propose a possible architectural change wherein a feedforward D is able to provide effective gradients for learning.
 
-<div align='center'>
-  <img src='images/model.png' width='1000px'>
-</div>
+## General Setup
 
-## Setup
-All code was developed and tested on Ubuntu 16.04 with Python 3.5 and PyTorch 0.4.
+Please refer to [Social GAN](https://github.com/agrimgupta92/sgan)
 
-You can setup a virtual environment to run the code like this:
+## Controlled Setup
 
 ```bash
-python3 -m venv env               # Create a virtual environment
-source env/bin/activate           # Activate virtual environment
-pip install -r requirements.txt   # Install dependencies
-echo $PWD > env/lib/python3.5/site-packages/sgan.pth  # Add current directory to python path
-# Work for a while ...
-deactivate  # Exit virtual environment
+python controlled_setup/controlled_data.py       # Create data
+sh controlled_setup/copy.sh single_traj          # Transfer data
 ```
 
-## Pretrained Models
-You can download pretrained models by running the script `bash scripts/download_models.sh`. This will download the following models:
-
-- `sgan-models/<dataset_name>_<pred_len>.pt`: Contains 10 pretrained models for all five datasets. These models correspond to SGAN-20V-20 in Table 1.
-- `sgan-p-models/<dataset_name>_<pred_len>.pt`: Contains 10 pretrained models for all five datasets. These models correspond to SGAN-20VP-20 in Table 1.
-
-Please refer to [Model Zoo](MODEL_ZOO.md) for results.
-
 ## Running Models
-You can use the script `scripts/evaluate_model.py` to easily run any of the pretrained models on any of the datsets. For example you can replicate the Table 1 results for all datasets for SGAN-20V-20 like this:
+
+For Social GAN, the default parameters are obtained using the following command
 
 ```bash
-python scripts/evaluate_model.py \
-  --model_path models/sgan-models
+python  python scripts/print_args.py --checkpoint models/sgan-models/eth_12_model.pt
 ```
 
 ## Training new models
-Instructions for training new models can be [found here](TRAINING.md).
+
+```bash
+python -m scripts.train --plot 1 --disc_type 'rnn' --plot 1 --min_ped 0 ## Default Social GAN
+python -m scripts.train --plot 1 --disc_type 'ff' --encoder_h_dim_g 16 --decoder_h_dim_g 16 --plot 1 --min_ped 0 ## Feedfoward Discriminator
+```

@@ -6,6 +6,7 @@ import sys
 import time
 
 from collections import defaultdict
+import matplotlib.pyplot as plt
 
 import torch
 import torch.nn as nn
@@ -15,9 +16,10 @@ from sgan.data.loader import data_loader
 from sgan.losses import gan_g_loss, gan_d_loss, l2_loss
 from sgan.losses import displacement_error, final_displacement_error
 
-from sgan.models import TrajectoryGenerator, TrajectoryDiscriminator
+from sgan.models import TrajectoryGenerator, TrajectoryDiscriminator, FeedforwardDiscriminator
 from sgan.utils import int_tuple, bool_flag, get_total_norm
 from sgan.utils import relative_to_abs, get_dset_path
+from sgan.utils import view_traj
 
 torch.backends.cudnn.benchmark = True
 
@@ -27,8 +29,7 @@ logging.basicConfig(level=logging.INFO, format=FORMAT, stream=sys.stdout)
 logger = logging.getLogger(__name__)
 
 # Dataset options
-parser.add_argument('--dataset_name', default='zara1', type=str)
-parser.add_argument('--delim', default=' ')
+parser.add_argument('--delim', default='\t')
 parser.add_argument('--loader_num_workers', default=4, type=int)
 parser.add_argument('--obs_len', default=8, type=int)
 parser.add_argument('--pred_len', default=8, type=int)
@@ -36,32 +37,33 @@ parser.add_argument('--skip', default=1, type=int)
 
 # Optimization
 parser.add_argument('--batch_size', default=64, type=int)
-parser.add_argument('--num_iterations', default=10000, type=int)
+parser.add_argument('--num_iterations', default=1000, type=int)
 parser.add_argument('--num_epochs', default=200, type=int)
 
 # Model Options
-parser.add_argument('--embedding_dim', default=64, type=int)
+parser.add_argument('--embedding_dim', default=16, type=int)
 parser.add_argument('--num_layers', default=1, type=int)
 parser.add_argument('--dropout', default=0, type=float)
 parser.add_argument('--batch_norm', default=0, type=bool_flag)
-parser.add_argument('--mlp_dim', default=1024, type=int)
+parser.add_argument('--mlp_dim', default=64, type=int)
+
 
 # Generator Options
-parser.add_argument('--encoder_h_dim_g', default=64, type=int)
-parser.add_argument('--decoder_h_dim_g', default=128, type=int)
-parser.add_argument('--noise_dim', default=None, type=int_tuple)
+parser.add_argument('--encoder_h_dim_g', default=32, type=int)
+parser.add_argument('--decoder_h_dim_g', default=32, type=int)
+parser.add_argument('--noise_dim', default=(8,), type=int_tuple)
 parser.add_argument('--noise_type', default='gaussian')
-parser.add_argument('--noise_mix_type', default='ped')
-parser.add_argument('--clipping_threshold_g', default=0, type=float)
-parser.add_argument('--g_learning_rate', default=5e-4, type=float)
+parser.add_argument('--noise_mix_type', default='global')
+parser.add_argument('--clipping_threshold_g', default=2.0, type=float)
+parser.add_argument('--g_learning_rate', default=0.0001, type=float)
 parser.add_argument('--g_steps', default=1, type=int)
 
 # Pooling Options
-parser.add_argument('--pooling_type', default='pool_net')
-parser.add_argument('--pool_every_timestep', default=1, type=bool_flag)
+parser.add_argument('--pooling_type', default=None)
+parser.add_argument('--pool_every_timestep', default=0, type=bool_flag)
 
 # Pool Net Option
-parser.add_argument('--bottleneck_dim', default=1024, type=int)
+parser.add_argument('--bottleneck_dim', default=8, type=int)
 
 # Social Pooling Options
 parser.add_argument('--neighborhood_size', default=2.0, type=float)
@@ -69,28 +71,36 @@ parser.add_argument('--grid_size', default=8, type=int)
 
 # Discriminator Options
 parser.add_argument('--d_type', default='local', type=str)
-parser.add_argument('--encoder_h_dim_d', default=64, type=int)
-parser.add_argument('--d_learning_rate', default=5e-4, type=float)
-parser.add_argument('--d_steps', default=2, type=int)
+parser.add_argument('--encoder_h_dim_d', default=48, type=int)
+parser.add_argument('--d_learning_rate', default=0.001, type=float)
+parser.add_argument('--d_steps', default=1, type=int)
 parser.add_argument('--clipping_threshold_d', default=0, type=float)
-
-# Loss Options
-parser.add_argument('--l2_loss_weight', default=0, type=float)
-parser.add_argument('--best_k', default=1, type=int)
+#d = 0.001
 
 # Output
 parser.add_argument('--output_dir', default=os.getcwd())
-parser.add_argument('--print_every', default=5, type=int)
-parser.add_argument('--checkpoint_every', default=100, type=int)
-parser.add_argument('--checkpoint_name', default='checkpoint')
+parser.add_argument('--print_every', default=30, type=int)
+parser.add_argument('--checkpoint_every', default=300, type=int)
 parser.add_argument('--checkpoint_start_from', default=None)
-parser.add_argument('--restore_from_checkpoint', default=1, type=int)
 parser.add_argument('--num_samples_check', default=5000, type=int)
 
 # Misc
 parser.add_argument('--use_gpu', default=1, type=int)
 parser.add_argument('--timing', default=0, type=int)
 parser.add_argument('--gpu_num', default="0", type=str)
+
+# Important changing Options
+parser.add_argument('--disc_type', default='rnn')
+parser.add_argument('--dataset_name', default='single_traj', type=str)
+parser.add_argument('--min_ped', default=1, type=int)
+parser.add_argument('--restore_from_checkpoint', default=0, type=int)
+parser.add_argument('--checkpoint_name', default='checkpoint')
+parser.add_argument('--plot', default=0, type=int)
+
+# Loss Options
+parser.add_argument('--l2_loss_weight', default=0.0, type=float)
+parser.add_argument('--best_k', default=3, type=int)
+
 
 
 def init_weights(m):
@@ -152,16 +162,28 @@ def main(args):
     logger.info('Here is the generator:')
     logger.info(generator)
 
-    discriminator = TrajectoryDiscriminator(
-        obs_len=args.obs_len,
-        pred_len=args.pred_len,
-        embedding_dim=args.embedding_dim,
-        h_dim=args.encoder_h_dim_d,
-        mlp_dim=args.mlp_dim,
-        num_layers=args.num_layers,
-        dropout=args.dropout,
-        batch_norm=args.batch_norm,
-        d_type=args.d_type)
+    if args.disc_type == 'rnn':
+        discriminator = TrajectoryDiscriminator(
+            obs_len=args.obs_len,
+            pred_len=args.pred_len,
+            embedding_dim=args.embedding_dim,
+            h_dim=args.encoder_h_dim_d,
+            mlp_dim=args.mlp_dim,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            batch_norm=args.batch_norm,
+            d_type=args.d_type)
+    else:
+        discriminator = FeedforwardDiscriminator(
+            obs_len=args.obs_len,
+            pred_len=args.pred_len,
+            embedding_dim=args.embedding_dim,
+            h_dim=args.encoder_h_dim_d,
+            mlp_dim=args.mlp_dim,
+            num_layers=args.num_layers,
+            dropout=args.dropout,
+            batch_norm=args.batch_norm,
+            d_type=args.d_type)
 
     discriminator.apply(init_weights)
     discriminator.type(float_dtype).train()
@@ -224,6 +246,9 @@ def main(args):
             'best_t_nl': None,
         }
     t0 = None
+    fig = plt.figure()
+    ax = fig.add_axes([0.1,0.1,0.75,0.75])
+
     while t < args.num_iterations:
         gc.collect()
         d_steps_left = args.d_steps
@@ -231,6 +256,7 @@ def main(args):
         epoch += 1
         logger.info('Starting epoch {}'.format(epoch))
         for batch in train_loader:
+            # print(batch[0])
             if args.timing == 1:
                 torch.cuda.synchronize()
                 t1 = time.time()
@@ -282,6 +308,9 @@ def main(args):
                     logger.info('  [G] {}: {:.3f}'.format(k, v))
                     checkpoint['G_losses'][k].append(v)
                 checkpoint['losses_ts'].append(t)
+
+                if args.plot:
+                    plot_trajectory(fig, ax, args, val_loader, generator)
 
             # Maybe save a checkpoint
             if t > 0 and t % args.checkpoint_every == 0:
@@ -432,15 +461,17 @@ def generator_step(
                 loss_mask[start:end])
             g_l2_loss_sum_rel += _g_l2_loss_rel
         losses['G_l2_loss_rel'] = g_l2_loss_sum_rel.item()
-        loss += g_l2_loss_sum_rel
-
+        # loss += g_l2_loss_sum_rel
+        loss += 2*args.l2_loss_weight*g_l2_loss_sum_rel
+    
     traj_fake = torch.cat([obs_traj, pred_traj_fake], dim=0)
     traj_fake_rel = torch.cat([obs_traj_rel, pred_traj_fake_rel], dim=0)
 
     scores_fake = discriminator(traj_fake, traj_fake_rel, seq_start_end)
     discriminator_loss = g_loss_fn(scores_fake)
 
-    loss += discriminator_loss
+    # loss += discriminator_loss
+    loss += 2*(1 - args.l2_loss_weight)*discriminator_loss
     losses['G_discriminator_loss'] = discriminator_loss.item()
     losses['G_total_loss'] = loss.item()
 
@@ -573,6 +604,37 @@ def cal_fde(
         pred_traj_fake[-1], pred_traj_gt[-1], non_linear_ped
     )
     return fde, fde_l, fde_nl
+
+## Important for controlled Experiments to plot trajectory distribution
+def plot_trajectory(fig, ax, args, loader, generator, save=False):
+    with torch.no_grad():
+        for batch in loader:
+            batch = [tensor.cuda() for tensor in batch]
+            (obs_traj, pred_traj_gt, obs_traj_rel, pred_traj_gt_rel,
+             non_linear_ped, loss_mask, seq_start_end) = batch
+            
+            all_three = True
+            for k in range(20):
+                pred_traj_fake_rel = generator(obs_traj, obs_traj_rel, seq_start_end)
+                pred_traj_fake = relative_to_abs(pred_traj_fake_rel, obs_traj[-1])
+
+                pred_traj_fake_permuted = pred_traj_fake.permute(1, 0, 2)
+                pred_traj_gt_permuted = pred_traj_gt.permute(1, 0, 2)
+                obs_traj_permuted = obs_traj.permute(1, 0, 2)
+
+                view_traj(ax, pred_traj_fake_permuted[0], pred_traj_gt_permuted[0], obs_traj_permuted[0], args, all_three=all_three)
+                all_three = False
+
+            ax.legend()
+            ax.set_ylim((-5, 5))
+            ax.set_xlim((0, 20))
+            plt.show()
+            if save:
+                print("Saving Plot")
+                fig.savefig("ffd_converge.jpg", bbox_inches="tight")   
+            ax.clear()
+            break 
+        return
 
 
 if __name__ == '__main__':

@@ -609,3 +609,45 @@ class TrajectoryDiscriminator(nn.Module):
             )
         scores = self.real_classifier(classifier_input)
         return scores
+
+
+class FeedforwardDiscriminator(nn.Module):
+    def __init__(
+        self, obs_len, pred_len, embedding_dim=64, h_dim=64, mlp_dim=1024,
+        num_layers=1, activation='relu', batch_norm=True, dropout=0.0,
+        d_type='local'
+    ):
+        super(FeedforwardDiscriminator, self).__init__()
+
+        self.obs_len = obs_len
+        self.pred_len = pred_len
+        self.seq_len = obs_len + pred_len
+        self.mlp_dim = mlp_dim
+        self.h_dim = h_dim
+        self.d_type = d_type
+        self.num_layers = num_layers
+
+        ## FeedForward
+        real_classifier_dims = [(obs_len + pred_len) * 2, 8, 8, 1]
+
+        self.real_classifier = make_mlp(
+            real_classifier_dims,
+            activation=activation,
+            batch_norm=batch_norm,
+            dropout=dropout
+        )
+
+    def forward(self, traj, traj_rel, seq_start_end=None):
+        """
+        Inputs:
+        - traj: Tensor of shape (obs_len + pred_len, batch, 2)
+        - traj_rel: Tensor of shape (obs_len + pred_len, batch, 2)
+        - seq_start_end: A list of tuples which delimit sequences within batch
+        Output:
+        - scores: Tensor of shape (batch,) with real/fake scores
+        """
+        batch = traj_rel.shape[1]
+        traj_rel = traj_rel.permute(1, 0, 2)
+        classifier_input = traj_rel.contiguous().view(batch, -1)
+        scores = self.real_classifier(classifier_input)
+        return scores

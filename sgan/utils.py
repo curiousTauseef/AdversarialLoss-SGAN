@@ -93,3 +93,37 @@ def relative_to_abs(rel_traj, start_pos):
     start_pos = torch.unsqueeze(start_pos, dim=1)
     abs_traj = displacement + start_pos
     return abs_traj.permute(1, 0, 2)
+
+## Important for controlled Experiments to plot trajectory distribution
+def view_traj(ax, fake_pred, real_pred, obs, args, all_three=False):
+    fake_pred = fake_pred.cpu().numpy()
+    real_pred = real_pred.cpu().numpy()
+    obs = obs.cpu().numpy()
+
+    fake_traj = np.concatenate((obs, fake_pred), axis=0)
+    real_traj = np.concatenate((obs, real_pred), axis=0)
+
+    if all_three:
+        x_obs = np.tile(np.linspace(1, 8, num=8, endpoint=True), (3,1))
+        y_obs = np.zeros((3, 8))
+        ##Real Predictions
+        x_pred = np.tile(np.linspace(9, 16, num=8, endpoint=True), (3,1))
+        y_pred = np.zeros((3, 8))
+
+        ##1st Mode (Straight Line)
+        ##2nd Mode (Up Slant Line)
+        y_pred[1, :] = 1*np.linspace(1, 8, num=8, endpoint=True)
+        ##3rd Mode (Down Slant Line)
+        y_pred[2, :] = -1*np.linspace(1, 8, num=8, endpoint=True)
+
+
+        ax.plot(fake_pred[:, 0], fake_pred[:, 1], 'g', label='Predicted')
+        ax.plot(x_obs[0],  y_obs[0],  'b',  label='Observed')
+        ax.plot(x_pred[0], y_pred[0], 'r', label='Real Pred 1')
+        if 'single' not in args.dataset_name:
+            ax.plot(x_pred[1], y_pred[1], 'r', label='Real Pred 2')
+            ax.plot(x_pred[2], y_pred[2], 'r', label='Real Pred 3')
+
+    else:
+        # pass
+        ax.plot(fake_pred[:, 0], fake_pred[:, 1], 'g')
